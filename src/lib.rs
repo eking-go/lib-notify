@@ -34,6 +34,12 @@ pub enum AgentType {
     Telegram(TelegramConfig),
 }
 
+impl Default for AgentType {
+    fn default() -> Self {
+        AgentType::Telegram(TelegramConfig::default())
+    }
+}
+
 #[derive(Debug, Default, Deserialize, Serialize, Clone)]
 pub struct TelegramConfig {
     pub token: String,

@@ -97,12 +97,15 @@ impl NotifyAgent {
     }
 
     pub fn send_notify(&self, msg: &String) {
+        if msg.is_empty() {
+            return;
+        };
         let result = generic_sender(&self.agent_type, &self.app_name, msg);
         match result {
             Ok(()) => (),
             Err(_) => {
                 if self.qs != 0 {
-                    println!("Move message to the queue");
+                    println!("NotifyAgent: Move message to the queue");
                     let mta = MessageToAgent {
                         message: msg.to_string(),
                         action: StopAgent::Empty,
@@ -110,7 +113,7 @@ impl NotifyAgent {
                     match self.sender.send(mta) {
                         Ok(()) => (),
                         Err(e) => {
-                            println!("Can't move message {} to queue! {}", msg, e)
+                            println!("NotifyAgent: Can't move message {} to queue! {}", msg, e)
                         }
                     };
                 };
@@ -128,58 +131,70 @@ fn sender_queue(
     qs: usize,
 ) {
     let mut dmq: Queue<String> = queue![];
-    let mut exit_flag = false;
     let sleep_delay = time::Duration::from_secs(rds);
     loop {
-        let dnow: DateTime<Local> = Local::now();
         // first of all we are trying to empty queue
-        loop {
-            match dmq.peek() {
-                Ok(q) => match generic_sender(agent_type, app_name, &q) {
-                    Ok(()) => {
-                        let _ = dmq.remove();
+        if dmq.size() > 0 {
+            loop {
+                match dmq.peek() {
+                    Ok(q) => {
+                        match generic_sender(agent_type, app_name, &q) {
+                            Ok(()) => {
+                                let _ = dmq.remove();
+                                let cqsize = dmq.size();
+                                println!("NotifyAgent: Delayed message has been sent, queue size : {cqsize}");
+                            }
+                            Err(_) => {
+                                let cqsize = dmq.size();
+                                println!("NotifyAgent: Unable to resend message from queue, queue size is {cqsize}");
+                                break;
+                            }
+                        }
                     }
                     Err(_) => break,
-                },
-                Err(_) => break,
-            };
+                };
+            }
         }
-        if dmq.size() == 0 && exit_flag {
-            break;
-        };
-        thread::sleep(sleep_delay);
         // trying to get new messages
         let (msg, action) = match receiver.try_recv() {
             Ok(m) => (m.message, m.action),
             Err(e) => match e {
-                std::sync::mpsc::TryRecvError::Empty => continue,
+                std::sync::mpsc::TryRecvError::Empty => {
+                    // If we don't receive new messages - just sleep and try one more time later
+                    thread::sleep(sleep_delay);
+                    continue;
+                }
                 std::sync::mpsc::TryRecvError::Disconnected => {
-                    println!("Receiver disconnected: {}", e);
+                    println!("NotifyAgent: Receiver disconnected: {}\nExiting...", e);
                     break;
                 }
             },
         };
+        // if we receive new messages - checking if we should exit
         match action {
             StopAgent::WhenQueueIsEmpty => {
-                exit_flag = true;
+                if dmq.size() == 0 {
+                    break;
+                };
             }
             StopAgent::Empty => (),
             StopAgent::Immediately => break,
         };
-        if msg.is_empty() {
-            continue;
-        };
+        // if queue size is equal max queue size, so, we don't have place to add one more message
+        // then we just remove oldest message
         if dmq.size() == qs {
             let _ = dmq.remove();
+            println!("NotifyAgent: Queue owerflow - remove the oldest message!");
         };
+        let dnow: DateTime<Local> = Local::now();
         let dmr = format!(
             "Message has been delayed since:\n{}\n{}",
             dnow.format("%Y-%m-%d %H:%M %:z"),
             &msg
         );
         match dmq.add(dmr) {
-            Ok(_) => (),
-            Err(e) => println!("Unable to add to internal queue: {}", e),
+            Ok(_) => println!("NotifyAgent: Added "),
+            Err(e) => println!("NotifyAgent: Unable to add to internal queue: {}", e),
         };
     }
 }

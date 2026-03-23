@@ -245,7 +245,11 @@ fn tg_send_msg(app_name: &String, s: &String, tc: &TelegramConfig) -> Result<(),
         .replace(")", r"\)")
         .replace(">", r"\>")
         .replace("=", r"\=")
-        .replace("_", r"\_");
+        .replace("_", r"\_")
+        .replace("{", r"\{")
+        .replace("}", r"\}")
+        .replace("[", r"\[")
+        .replace("]", r"\]");
     let instance = create_instance(&tc.token, &tc.chat);
     let option = SendMessageOption {
         parse_mode: Some(SendMessageParseMode::MarkdownV2),
